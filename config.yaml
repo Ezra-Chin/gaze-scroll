@@ -1,0 +1,45 @@
+camera:
+  index: 0
+  width: 1280
+  height: 720
+
+backend: mediapipe            # mediapipe | hailo
+model_path: models/face_landmarker.task
+calibration_path: calibration.json
+
+gaze:
+  # score = iris_weight * iris_offset + pitch_weight * (pitch / pitch_norm_deg)
+  # iris_offset is iris height vs. the eye corners / eye width (roughly -0.1..+0.1).
+  iris_weight: 1.0
+  pitch_weight: 0.05          # small: head-pose noise otherwise swamps the eye signal
+  pitch_norm_deg: 20.0
+  median_window: 5
+  ema_alpha: 0.3
+  hysteresis_ms: 200
+
+calibration:
+  center_s: 3.0               # seconds sampling the resting (center) gaze
+  edge_s: 2.0                 # seconds at the top / bottom dots
+  up_fraction: 0.35           # UP threshold = 35% of the way from center to the top dot
+  down_fraction: 0.5          # DOWN threshold = 50% of the way from center to the bottom dot
+  noise_k: 2.5                # thresholds never closer to center than k * center noise
+  fallback_margin: 0.02       # used if looking up/down didn't move the reading
+
+scroll:
+  tick_ms: 50                 # how often to send a scroll event while in UP/DOWN
+  min: 1                      # scroll units per tick just past the threshold
+  max: 8                      # cap when gaze is far past the threshold
+
+eyes:
+  ear_closed_thresh: 0.18     # EAR below this = eyes closed (no scrolling)
+
+gestures:
+  blink_click: false
+  blink_click_ms: 600
+  dwell_click: false
+  dwell_s: 1.5
+  dwell_radius: 0.03
+
+overlay: true
+failsafe: true                # pyautogui: slam mouse into a corner to abort
+hotkey: "<ctrl>+<alt>+p"      # global pause/resume (pynput syntax)
