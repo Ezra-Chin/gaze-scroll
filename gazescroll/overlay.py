@@ -52,7 +52,7 @@ def draw(frame: np.ndarray, state: dict) -> np.ndarray:
         f"  center {fmt(state.get('center'), '+.4f')}  down>{fmt(state.get('down_thresh'), '+.4f')}",
         f"FPS {fmt(state.get('fps'), '.1f')}  frame {fmt(state.get('frame_ms'), '.1f')} ms"
         f"  infer {fmt(state.get('infer_ms'), '.1f')} ms",
-        "P pause  R re-center  C calibrate  O overlay  Q quit",
+        "P pause  R re-center  C calibrate  G gaze dot  K dot calib  O overlay  Q quit",
     ]
     for k, s in enumerate(lines):
         _text(img, s, (12, h - 16 - 24 * (len(lines) - 1 - k)))

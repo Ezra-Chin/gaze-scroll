@@ -71,6 +71,22 @@ def vertical_iris_offset(lm: np.ndarray) -> float:
     return (offset(*R_CORNERS, R_IRIS) + offset(*L_CORNERS, L_IRIS)) / 2.0
 
 
+def horizontal_iris_offset(lm: np.ndarray) -> float:
+    """Iris x relative to the eye-corner midpoint, divided by eye width.
+
+    In (unmirrored) image coordinates: positive = iris toward the image right,
+    which is the user's left. Averaged over both eyes.
+    """
+    def offset(c1, c2, iris):
+        width = np.linalg.norm(lm[c1, :2] - lm[c2, :2])
+        if width < 1e-6:
+            return 0.0
+        mid_x = (lm[c1, 0] + lm[c2, 0]) / 2
+        return float((lm[iris, 0] - mid_x) / width)
+
+    return (offset(*R_CORNERS, R_IRIS) + offset(*L_CORNERS, L_IRIS)) / 2.0
+
+
 def eye_aspect_ratio(lm: np.ndarray) -> float:
     """Lid opening / eye width, averaged over both eyes. ~0.25-0.35 open, <0.15 closed."""
     def ear(c1, c2, up, lo):
@@ -82,8 +98,19 @@ def eye_aspect_ratio(lm: np.ndarray) -> float:
     return (ear(*R_CORNERS, R_UPPER, R_LOWER) + ear(*L_CORNERS, L_UPPER, L_LOWER)) / 2.0
 
 
-def head_pitch(lm: np.ndarray, width: int, height: int) -> float | None:
-    """Head pitch in degrees, positive = head tilted down. None if PnP fails."""
+def _wrap(a: float) -> float:
+    """Keep an angle near zero for a roughly frontal face (guard against 180° flips)."""
+    if a > 90:
+        return a - 180
+    if a < -90:
+        return a + 180
+    return a
+
+
+def head_pose(lm: np.ndarray, width: int, height: int) -> tuple[float, float, float] | None:
+    """(pitch, yaw, roll) in degrees. Pitch positive = head tilted down; yaw
+    positive = nose toward the image left (user turning to their right).
+    None if PnP fails."""
     pts2d = np.array([(lm[i, 0] * width, lm[i, 1] * height) for i in PNP_IDX], dtype=np.float64)
     f = float(width)
     cam = np.array([[f, 0, width / 2], [0, f, height / 2], [0, 0, 1]], dtype=np.float64)
@@ -92,13 +119,13 @@ def head_pitch(lm: np.ndarray, width: int, height: int) -> float | None:
         return None
     rmat, _ = cv2.Rodrigues(rvec)
     angles = cv2.RQDecomp3x3(rmat)[0]
-    pitch = float(angles[0])
-    # Keep near zero for a roughly frontal face (guard against 180° flips).
-    if pitch > 90:
-        pitch -= 180
-    elif pitch < -90:
-        pitch += 180
-    return pitch
+    return _wrap(float(angles[0])), _wrap(float(angles[1])), _wrap(float(angles[2]))
+
+
+def head_pitch(lm: np.ndarray, width: int, height: int) -> float | None:
+    """Head pitch in degrees, positive = head tilted down. None if PnP fails."""
+    pose = head_pose(lm, width, height)
+    return None if pose is None else pose[0]
 
 
 def gaze_score(iris_offset: float, pitch_deg: float | None, cfg: dict) -> float:

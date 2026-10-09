@@ -5,3 +5,4 @@ __pycache__/
 models/*.task
 benchmarks/
 calibration.json
+gaze_map.json

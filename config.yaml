@@ -40,6 +40,14 @@ gestures:
   dwell_s: 1.5
   dwell_radius: 0.03
 
+pointer:                      # on-screen gaze dot (G to toggle, K to recalibrate)
+  enabled: false
+  map_path: gaze_map.json
+  ridge: 0.001                # regularization for the 9-dot regression
+  min_cutoff: 0.5             # One-Euro filter: lower = steadier dot when fixating
+  beta: 0.003                 # One-Euro filter: higher = follows fast eye jumps sooner
+  radius: 22                  # dot size in screen points
+
 overlay: true
 failsafe: true                # pyautogui: slam mouse into a corner to abort
 hotkey: "<ctrl>+<alt>+p"      # global pause/resume (pynput syntax)

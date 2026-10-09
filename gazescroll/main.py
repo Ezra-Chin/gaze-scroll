@@ -14,6 +14,7 @@ from .calibration import Calibration, run_calibration
 from .camera import Camera
 from .config import load_config, resolve
 from .gaze import Smoother, Zone, eye_aspect_ratio, gaze_score, head_pitch, vertical_iris_offset
+from .pointer import GazeMapper, OverlayProcess, PointFilter, features, run_pointer_calibration
 
 
 def calibrate(camera, backend, cfg) -> Calibration | None:
@@ -27,6 +28,16 @@ def calibrate(camera, backend, cfg) -> Calibration | None:
           f"(noise {calib.center_std:.4f}) bottom={calib.bottom:.4f} -> "
           f"UP < {calib.up_thresh:.4f}, DOWN > {calib.down_thresh:.4f}")
     return calib
+
+
+def calibrate_pointer(camera, backend, cfg) -> GazeMapper | None:
+    mapper = run_pointer_calibration(camera, backend, cfg, pyautogui.size())
+    if mapper is None:
+        return None
+    mapper.save(resolve(cfg["pointer"]["map_path"]))
+    print(f"Pointer calibration saved (mean error on calibration dots: "
+          f"{mapper.mean_error_px:.0f} px). Press K to redo it.")
+    return mapper
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,6 +65,23 @@ def main(argv: list[str] | None = None) -> int:
     sc = cfg["scroll"]
     scroller = actions.Scroller(sc["tick_ms"], sc["min"], sc["max"])
     ear_thresh = cfg["eyes"]["ear_closed_thresh"]
+
+    pc = cfg["pointer"]
+    mapper = GazeMapper.load(resolve(pc["map_path"]))
+    point_filter = PointFilter(pc["min_cutoff"], pc["beta"])
+    pointer: OverlayProcess | None = None
+
+    def start_pointer() -> OverlayProcess | None:
+        nonlocal mapper
+        if mapper is None:
+            mapper = calibrate_pointer(camera, backend, cfg)
+            if mapper is None:
+                return None
+        point_filter.reset()
+        return OverlayProcess(pc["radius"])
+
+    if pc["enabled"]:
+        pointer = start_pointer()
 
     show_overlay = cfg["overlay"]
     paused = False
@@ -93,6 +121,17 @@ def main(argv: list[str] | None = None) -> int:
                     zone, overshoot = classifier.update(score, now)
                     state["score"] = score
                     state["zone"] = zone
+                    if pointer is not None:
+                        feat = features(lm, w, h)
+                        if feat is not None:
+                            gx, gy = point_filter(*mapper.predict(feat), now)
+                            state["gaze_px"] = (gx, gy)
+            if pointer is not None:
+                if "gaze_px" in state:
+                    pointer.send(*state["gaze_px"], True)
+                else:
+                    pointer.send(0, 0, False)
+                    point_filter.reset()
 
             if paused:
                 state["status"] = "PAUSED"
@@ -121,6 +160,17 @@ def main(argv: list[str] | None = None) -> int:
                 calib.save(resolve(cfg["calibration_path"]))
                 classifier = calib.classifier(g["hysteresis_ms"])
                 print(f"Re-centered at {calib.center:.4f}")
+            elif key == ord("g"):
+                if pointer is None:
+                    pointer = start_pointer()
+                else:
+                    pointer.close()
+                    pointer = None
+            elif key == ord("k"):
+                new_map = calibrate_pointer(camera, backend, cfg)
+                if new_map is not None:
+                    mapper = new_map
+                    point_filter.reset()
             elif key == ord("c"):
                 new = calibrate(camera, backend, cfg)
                 if new is not None:
@@ -128,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
                     classifier = calib.classifier(g["hysteresis_ms"])
                 smoother.reset()
     finally:
+        if pointer is not None:
+            pointer.close()
         camera.release()
         backend.close()
         cv2.destroyAllWindows()

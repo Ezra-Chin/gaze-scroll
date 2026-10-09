@@ -111,10 +111,32 @@ def _draw(screen_w: int, screen_h: int, pos: tuple[int, int], label: str,
     return img
 
 
-def _sample(camera, backend, cfg, sw, sh, pos, label, duration) -> list[float] | None:
-    """Show a dot and collect gaze scores while the user looks at it."""
+def score_of(cfg: dict):
+    """Measure function for the scroll calibration: the 1-D vertical gaze score."""
+    def measure(face):
+        lm = face.landmarks
+        w, h = face.image_size
+        return gaze_score(vertical_iris_offset(lm), head_pitch(lm, w, h), cfg)
+    return measure
+
+
+def open_fullscreen() -> None:
+    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+
+def close_fullscreen() -> None:
+    cv2.destroyWindow(WINDOW)
+    cv2.waitKey(1)
+
+
+def sample_target(camera, backend, cfg, screen_size, pos, label, duration, measure,
+                  settle_s: float = SETTLE_S) -> list | None:
+    """Show a dot and collect `measure(face)` values while the user looks at it.
+    Eyes-closed frames are skipped. None if the user aborts with Esc/Q."""
+    sw, sh = screen_size
     ear_thresh = cfg["eyes"]["ear_closed_thresh"]
-    samples: list[float] = []
+    samples: list = []
     start = time.perf_counter()
     while True:
         elapsed = time.perf_counter() - start
@@ -123,21 +145,20 @@ def _sample(camera, backend, cfg, sw, sh, pos, label, duration) -> list[float] |
         if frame is not None:
             face = backend.process(frame)
             if face is not None:
-                lm = face.landmarks
-                if eye_aspect_ratio(lm) < ear_thresh:
+                if eye_aspect_ratio(face.landmarks) < ear_thresh:
                     status = "Eyes closed"
                 else:
                     status = "Keep your head still, move only your eyes"
-                    if elapsed >= SETTLE_S:
-                        w, h = face.image_size
-                        samples.append(gaze_score(vertical_iris_offset(lm),
-                                                  head_pitch(lm, w, h), cfg))
-        progress = max(0.0, (elapsed - SETTLE_S) / duration)
+                    if elapsed >= settle_s:
+                        value = measure(face)
+                        if value is not None:
+                            samples.append(value)
+        progress = max(0.0, (elapsed - settle_s) / duration)
         cv2.imshow(WINDOW, _draw(sw, sh, pos, label, min(progress, 1.0), status))
         key = cv2.waitKey(1) & 0xFF
         if key in (27, ord("q")):
             return None
-        if elapsed >= SETTLE_S + duration and len(samples) >= 10:
+        if elapsed >= settle_s + duration and len(samples) >= 10:
             return samples
 
 
@@ -152,18 +173,17 @@ def run_calibration(camera, backend, cfg: dict, screen_size: tuple[int, int]) ->
         ("Look DOWN at the dot", (sw // 2, sh - 30), cal["edge_s"]),
     ]
 
-    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    measure = score_of(cfg)
+    open_fullscreen()
     results = []
     try:
         for label, pos, duration in steps:
-            samples = _sample(camera, backend, cfg, sw, sh, pos, label, duration)
+            samples = sample_target(camera, backend, cfg, screen_size, pos, label, duration, measure)
             if samples is None:
                 return None
             results.append(samples)
     finally:
-        cv2.destroyWindow(WINDOW)
-        cv2.waitKey(1)
+        close_fullscreen()
 
     center_s, top_s, bottom_s = (np.asarray(r) for r in results)
     center = float(np.median(center_s))
